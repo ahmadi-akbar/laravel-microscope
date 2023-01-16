@@ -88,7 +88,7 @@ class CheckClassReferences
 
         return [
             $wrongImports,
-            $unusedCorrectImports
+            $unusedCorrectImports,
         ];
     }
 }
