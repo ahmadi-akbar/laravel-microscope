@@ -20,13 +20,20 @@ class CheckClassReferences
 
     public static function check($tokens, $absPath)
     {
-        $imports = ParseUseStatement::parseUseStatements($tokens);
-        $imports = $imports[0] ?: [$imports[1]];
-        self::$refCount = self::$refCount + count($imports);
-        [$classes, $namespace] = ClassReferenceFinder::process($tokens);
-        $unusedRefs = ParseUseStatement::getUnusedImports($classes, $imports, []);
-        [$expandedClasses,] = ClassRefExpander::expendReferences($classes, $imports, $namespace);
-        self::printResults($expandedClasses, $absPath, $unusedRefs);
+        [$wrongImports, $unusedImports] = self::getBadImports($tokens);
+
+        /**
+         * @var $printer  ErrorPrinter
+         */
+        $printer = app(ErrorPrinter::class);
+
+        foreach ($wrongImports as $class) {
+            $printer->wrongUsedClassError($absPath, $class['class'], $class['line']);
+        }
+
+        foreach ($unusedImports as $class) {
+            $printer->extraImport($absPath, $class[0], $class[1]);
+        }
     }
 
     private static function exists($class)
@@ -40,23 +47,26 @@ class CheckClassReferences
         }
     }
 
-    private static function printImportNotUsed($unusedRefs, $wrongImports, ErrorPrinter $printer, $absPath)
+    private static function getUnusedCorrectImports($unusedRefs, $wrongImports)
     {
+        $unusedCorrectImports = [];
+
         foreach ($unusedRefs as $class) {
-            if (! in_array($class[0], $wrongImports)) {
+            if (! in_array($class[0], $wrongImports['class'])) {
                 self::$unusedImportsCount++;
-                $printer->extraImport($absPath, $class[0], $class[1]);
+                $unusedCorrectImports[] = $class;
             }
         }
+
+        return $unusedCorrectImports;
     }
 
-    private static function printWrongImports($expandedClasses, ErrorPrinter $printer, $absPath): array
+    private static function getWrongImports($expandedClasses)
     {
         $wrongImports = [];
         foreach ($expandedClasses as $class) {
             if (! self::exists($class['class'])) {
-                $wrongImports[] = $class['class'];
-                $printer->wrongUsedClassError($absPath, $class['class'], $class['line']);
+                $wrongImports[] = $class;
             }
         }
 
@@ -65,15 +75,20 @@ class CheckClassReferences
         return $wrongImports;
     }
 
-    private static function printResults($expandedClasses, $absPath, array $unusedRefs)
+    private static function getBadImports($tokens)
     {
-        /**
-         * @var $printer  ErrorPrinter
-         */
-        $printer = app(ErrorPrinter::class);
+        $imports = ParseUseStatement::parseUseStatements($tokens);
+        $imports = $imports[0] ?: [$imports[1]];
+        self::$refCount = self::$refCount + count($imports);
+        [$classes, $namespace] = ClassReferenceFinder::process($tokens);
+        [$expandedClasses,] = ClassRefExpander::expendReferences($classes, $imports, $namespace);
 
-        $wrongImports = self::printWrongImports($expandedClasses, $printer, $absPath);
+        $wrongImports = self::getWrongImports($expandedClasses);
+        $unusedCorrectImports = self::getUnusedCorrectImports(ParseUseStatement::getUnusedImports($classes, $imports, []), $wrongImports);
 
-        self::printImportNotUsed($unusedRefs, $wrongImports, $printer, $absPath);
+        return [
+            $wrongImports,
+            $unusedCorrectImports
+        ];
     }
 }
